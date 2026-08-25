@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert Basera graduation study Markdown to formatted Arabic RTL Word document."""
+"""Convert Basera graduation study Markdown to academic Arabic RTL Word (.docx)."""
 
 from __future__ import annotations
 
@@ -8,21 +8,16 @@ import sys
 from pathlib import Path
 
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml.shared import OxmlElement as OE
 
-
-def shade_cell(cell, fill: str = "D9E2F3") -> None:
-    tc = cell._tc
-    tc_pr = tc.get_or_add_tcPr()
-    shd = OE("w:shd")
-    shd.set(qn("w:fill"), fill)
-    shd.set(qn("w:val"), "clear")
-    tc_pr.append(shd)
+BODY_FONT = "Traditional Arabic"
+FALLBACK_FONT = "Arial"
+HEADING_COLOR = RGBColor(0x1B, 0x4F, 0x72)
+MUTED = RGBColor(0x5A, 0x6A, 0x7A)
 
 
 def set_paragraph_rtl(paragraph) -> None:
@@ -38,36 +33,90 @@ def set_run_rtl(run) -> None:
     r_pr.append(rtl)
 
 
-def add_formatted_text(paragraph, text: str, *, bold_default: bool = False, font_name: str = "Arial") -> None:
-    """Parse **bold** and `code` inline markers."""
+def set_run_font(run, size: Pt, *, bold: bool = False, name: str = BODY_FONT) -> None:
+    run.bold = bold
+    run.font.name = name
+    run.font.size = size
+    r_pr = run._r.get_or_add_rPr()
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, r_fonts)
+    r_fonts.set(qn("w:ascii"), FALLBACK_FONT)
+    r_fonts.set(qn("w:hAnsi"), FALLBACK_FONT)
+    r_fonts.set(qn("w:cs"), name)
+    set_run_rtl(run)
+
+
+def shade_cell(cell, fill: str = "D6EAF8") -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:fill"), fill)
+    shd.set(qn("w:val"), "clear")
+    tc_pr.append(shd)
+
+
+def add_page_number(paragraph) -> None:
+    run = paragraph.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = " PAGE "
+    sep = OxmlElement("w:fldChar")
+    sep.set(qn("w:fldCharType"), "separate")
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(sep)
+    run._r.append(end)
+
+
+def add_header_footer(doc: Document) -> None:
+    section = doc.sections[0]
+
+    hp = section.header.paragraphs[0]
+    set_paragraph_rtl(hp)
+    hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = hp.add_run("دراسة مشروع التخرج — نظام بصيرة (Basera)")
+    set_run_font(run, Pt(10), name=FALLBACK_FONT)
+    run.font.color.rgb = MUTED
+
+    fp = section.footer.paragraphs[0]
+    set_paragraph_rtl(fp)
+    fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = fp.add_run("صفحة ")
+    set_run_font(run, Pt(10), name=FALLBACK_FONT)
+    add_page_number(fp)
+    run2 = fp.add_run(" — مشروع بصيرة")
+    set_run_font(run2, Pt(10), name=FALLBACK_FONT)
+
+
+def add_formatted_text(
+    paragraph,
+    text: str,
+    *,
+    bold_default: bool = False,
+    size: Pt = Pt(14),
+) -> None:
     pattern = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`)")
     pos = 0
     for match in pattern.finditer(text):
         if match.start() > pos:
             run = paragraph.add_run(text[pos : match.start()])
-            run.bold = bold_default
-            run.font.name = font_name
-            run.font.size = Pt(12)
-            set_run_rtl(run)
+            set_run_font(run, size, bold=bold_default)
         chunk = match.group(0)
         if chunk.startswith("**"):
             run = paragraph.add_run(chunk[2:-2])
-            run.bold = True
+            set_run_font(run, size, bold=True)
         else:
             run = paragraph.add_run(chunk[1:-1])
-            run.font.name = "Consolas"
-            run.font.size = Pt(10)
-        run.font.name = font_name if not chunk.startswith("`") else "Consolas"
-        if not chunk.startswith("`"):
-            run.font.size = Pt(12)
-        set_run_rtl(run)
+            set_run_font(run, Pt(11), name="Consolas")
         pos = match.end()
     if pos < len(text):
         run = paragraph.add_run(text[pos:])
-        run.bold = bold_default
-        run.font.name = font_name
-        run.font.size = Pt(12)
-        set_run_rtl(run)
+        set_run_font(run, size, bold=bold_default)
 
 
 def is_table_row(line: str) -> bool:
@@ -107,9 +156,8 @@ def add_table(doc: Document, rows: list[list[str]]) -> None:
             cell.text = ""
             p = cell.paragraphs[0]
             set_paragraph_rtl(p)
-            add_formatted_text(p, cell_text)
+            add_formatted_text(p, cell_text, size=Pt(12))
             for run in p.runs:
-                run.font.size = Pt(11)
                 if ri == 0:
                     run.bold = True
             if ri == 0:
@@ -119,70 +167,77 @@ def add_table(doc: Document, rows: list[list[str]]) -> None:
 
 def add_heading(doc: Document, text: str, level: int, *, is_first_title: bool = False) -> None:
     clean = text.lstrip("#").strip()
-    sizes = {1: 24, 2: 18, 3: 16, 4: 14, 5: 13}
+    sizes = {1: 26, 2: 18, 3: 16, 4: 14, 5: 13}
 
+    # فاصل صفحة قبل الأبواب الرئيسية المرقّمة
     if level == 2 and re.match(r"^#{2}\s+\d", text):
         doc.add_page_break()
 
     p = doc.add_paragraph()
     set_paragraph_rtl(p)
-    if is_first_title:
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    else:
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p.paragraph_format.space_before = Pt(14 if level <= 2 else 8)
-    p.paragraph_format.space_after = Pt(8)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER if is_first_title else WD_ALIGN_PARAGRAPH.RIGHT
+    p.paragraph_format.space_before = Pt(16 if level <= 2 else 10)
+    p.paragraph_format.space_after = Pt(10)
+    p.paragraph_format.keep_with_next = True
     run = p.add_run(clean)
-    run.bold = True
-    run.font.name = "Arial"
-    run.font.size = Pt(sizes.get(level, 12))
-    if is_first_title:
-        run.font.size = Pt(26)
-    set_run_rtl(run)
+    set_run_font(run, Pt(sizes.get(level, 12)), bold=True, name=FALLBACK_FONT)
+    run.font.color.rgb = HEADING_COLOR
 
 
 def add_codeblock(doc: Document, lines: list[str], language: str = "") -> None:
-    label = "مخطط (Mermaid) — يُعرض في Markdown/VS Code:" if language == "mermaid" else "كود:"
-    if language == "mermaid":
-        p = doc.add_paragraph()
-        set_paragraph_rtl(p)
-        run = p.add_run(label)
-        run.bold = True
-        run.italic = True
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
-        run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
-        set_run_rtl(run)
+    label = (
+        "مخطط (Mermaid) — يُعرض في محرر Markdown أو VS Code، ويُنصح بتصديره صورة للطباعة:"
+        if language == "mermaid"
+        else "مقتطف برمجي:"
+    )
+    p = doc.add_paragraph()
+    set_paragraph_rtl(p)
+    run = p.add_run(label)
+    set_run_font(run, Pt(11), bold=True, name=FALLBACK_FONT)
+    run.italic = True
+    run.font.color.rgb = MUTED
 
-    for line in lines:
-        p = doc.add_paragraph()
-        set_paragraph_rtl(p)
-        p.paragraph_format.left_indent = Cm(0.5)
-        run = p.add_run(line)
-        run.font.name = "Consolas"
-        run.font.size = Pt(9)
+    # اختصار مخططات Mermaid الطويلة في Word
+    display = lines
+    if language == "mermaid" and len(lines) > 24:
+        display = lines[:20] + ["… (المخطط الكامل في ملف Markdown)"]
+
+    for line in display:
+        cp = doc.add_paragraph()
+        set_paragraph_rtl(cp)
+        cp.paragraph_format.left_indent = Cm(0.4)
+        cp.paragraph_format.space_after = Pt(0)
+        run = cp.add_run(line)
+        set_run_font(run, Pt(9), name="Consolas")
         run.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
-        if language == "mermaid":
-            set_run_rtl(run)
     doc.add_paragraph()
+
+
+def style_body_paragraph(p) -> None:
+    set_paragraph_rtl(p)
+    pf = p.paragraph_format
+    pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+    pf.space_after = Pt(8)
+    pf.space_before = Pt(0)
 
 
 def configure_document(doc: Document) -> None:
     section = doc.sections[0]
     section.page_height = Cm(29.7)
     section.page_width = Cm(21.0)
-    section.top_margin = Cm(2.5)
-    section.bottom_margin = Cm(2.5)
+    section.top_margin = Cm(2.8)
+    section.bottom_margin = Cm(2.8)
     section.left_margin = Cm(2.5)
     section.right_margin = Cm(2.5)
 
-    # Default RTL for Normal style
     styles = doc.styles["Normal"]
-    styles.font.name = "Arial"
-    styles.font.size = Pt(12)
+    styles.font.name = BODY_FONT
+    styles.font.size = Pt(14)
     pf = styles.paragraph_format
     pf.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    pf.line_spacing = 1.35
+    pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+
+    add_header_footer(doc)
 
 
 def convert_md_to_docx(md_path: Path, docx_path: Path) -> None:
@@ -201,7 +256,6 @@ def convert_md_to_docx(md_path: Path, docx_path: Path) -> None:
         line = lines[i]
         stripped = line.strip()
 
-        # Fenced code block
         if stripped.startswith("```"):
             if not in_code:
                 in_code = True
@@ -220,7 +274,6 @@ def convert_md_to_docx(md_path: Path, docx_path: Path) -> None:
             i += 1
             continue
 
-        # Headings
         m = re.match(r"^(#{1,5})\s+(.+)$", line)
         if m:
             lvl = len(m.group(1))
@@ -230,65 +283,60 @@ def convert_md_to_docx(md_path: Path, docx_path: Path) -> None:
             i += 1
             continue
 
-        # Horizontal rule
         if stripped in ("---", "***", "___"):
             p = doc.add_paragraph()
             set_paragraph_rtl(p)
-            run = p.add_run("─" * 40)
-            run.font.color.rgb = RGBColor(0xAA, 0xAA, 0xAA)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run("─" * 28)
+            set_run_font(run, Pt(11), name=FALLBACK_FONT)
+            run.font.color.rgb = RGBColor(0xBB, 0xBB, 0xBB)
             i += 1
             continue
 
-        # Blockquote
         if stripped.startswith(">"):
             p = doc.add_paragraph()
-            set_paragraph_rtl(p)
-            add_formatted_text(p, stripped.lstrip(">").strip(), bold_default=False)
+            style_body_paragraph(p)
+            add_formatted_text(p, stripped.lstrip(">").strip())
             for run in p.runs:
                 run.italic = True
+                run.font.color.rgb = HEADING_COLOR
             i += 1
             continue
 
-        # Table
         if is_table_row(line):
             rows, consumed = parse_table_rows(lines[i:])
             add_table(doc, rows)
             i += consumed
             continue
 
-        # Ordered list
         m = re.match(r"^(\d+)\.\s+(.+)$", stripped)
         if m:
             p = doc.add_paragraph()
-            set_paragraph_rtl(p)
+            style_body_paragraph(p)
+            p.paragraph_format.right_indent = Cm(0.4)
             add_formatted_text(p, f"{m.group(1)}. {m.group(2)}")
-            p.paragraph_format.left_indent = Cm(0.75)
             i += 1
             continue
 
-        # Unordered list
         if stripped.startswith("- ") or stripped.startswith("* "):
             p = doc.add_paragraph()
-            set_paragraph_rtl(p)
+            style_body_paragraph(p)
+            p.paragraph_format.right_indent = Cm(0.4)
             add_formatted_text(p, "• " + stripped[2:])
-            p.paragraph_format.left_indent = Cm(0.75)
             i += 1
             continue
 
-        # Empty line
         if not stripped:
             i += 1
             continue
 
-        # Regular paragraph
         p = doc.add_paragraph()
-        set_paragraph_rtl(p)
+        style_body_paragraph(p)
         add_formatted_text(p, stripped)
         i += 1
 
     doc.save(str(docx_path))
-    size_kb = docx_path.stat().st_size // 1024
-    print(f"Saved OK ({size_kb} KB)")
+    print(f"Saved OK ({docx_path.stat().st_size // 1024} KB)")
 
 
 def main() -> int:
@@ -302,7 +350,7 @@ def main() -> int:
         docx_path = Path(sys.argv[2])
 
     if not md_path.exists():
-        print(f"Missing: {md_path}", file=sys.stderr)
+        print(f"Missing markdown", file=sys.stderr)
         return 1
 
     convert_md_to_docx(md_path, docx_path)

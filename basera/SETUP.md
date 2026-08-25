@@ -30,6 +30,23 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+**مهم على Windows:** لا تستخدم `python` العام. فعّل بيئة المشروع أولاً:
+
+```powershell
+cd backend
+.\venv\Scripts\activate
+python manage.py runserver
+```
+
+أو شغّل مباشرة بدون تفعيل:
+
+```powershell
+cd backend
+.\venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
+```
+
+أو انقر / نفّذ الملف: `backend\run_server.bat`
+
 الـ API سيكون متاح على: `http://localhost:8000/api/`
 
 ### 2. Frontend Setup

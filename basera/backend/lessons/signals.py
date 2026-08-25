@@ -20,6 +20,17 @@ def extract_text_from_pdf(sender, instance, **kwargs):
     """
     إشارة لاستخراج النص من PDF أو text_content قبل حفظ الدرس
     """
+    # إذا حُدّث محتوى النص يدوياً نزامن النص المفروغ حتى يظهر في التطبيق
+    if instance.pk:
+        try:
+            old = Lesson.objects.get(pk=instance.pk)
+            new_text = (instance.text_content or '').strip()
+            old_text = (old.text_content or '').strip()
+            if new_text and new_text != old_text:
+                instance.transcribed_text = instance.text_content
+        except Lesson.DoesNotExist:
+            pass
+
     # استخراج النص من PDF أو text_content إذا كان هناك نص ولم يتم استخراجه بعد
     if (instance.pdf_file or instance.text_content) and not instance.transcribed_text:
         # تحديث حالة التحويل
